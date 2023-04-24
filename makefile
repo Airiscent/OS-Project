@@ -2,10 +2,10 @@ CC=gcc
 CFLAGS=
 RM = rm -f
 
-all: exe
+all: a.out
 
-exe: OSProject.c
-	$(CC) $(CFLAGS) -o exe OSProject.c
+a.out: OSProject.c
+	$(CC) $(CFLAGS) -o a.out OSProject.c
 clean:
-	$(RM) exe
+	$(RM) a.out
 
