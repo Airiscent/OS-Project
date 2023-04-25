@@ -1,28 +1,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
-#define PAGE_SIZE 256
+#define FRAME_SIZE 256
 #define TLB_SIZE 16
-#define PAGE_ENTRIES 256
-#define FRAMES 256
+#define NUM_PAGES 256
+#define NUM_FRAMES 128
 #define MEMORY_SIZE 65536
 
+#define TLB_MISS 65535
+#define PAGE_TABLE_MISS 65535
+
 // Global variables for page table, TLB, and memory
-int page_table[PAGE_ENTRIES];
-int tlb[TLB_SIZE][2];
-signed char memory[MEMORY_SIZE];
+int page_table[NUM_PAGES] = { -1 };
+int tlb[TLB_SIZE][2] = { -1 };
+signed char memory[MEMORY_SIZE] = { -1 };
 
 // Variables for tracking available frames, page faults, TLB hits, and total addresses
 int available_frames = 0;
 int page_faults = 0;
 int tlb_hits = 0;
 int total_addresses = 0;
+uint8_t next_frame_number = 0;
 
 // Function prototypes
-int search_tlb(int page_number);
-int search_page_table(int page_number);
-void update_tlb(int page_number, int frame_number);
+void read_file_page(FILE *file, signed char buffer[FRAME_SIZE], int page);
+void remove_from_page_table(uint8_t frame_number);
+void remove_from_tlb(uint8_t frame_number);
+void print_frame(signed char *buffer);
+uint16_t search_tlb(int page_number);
+void update_page_table(int page_number, uint8_t frame_number);
+uint16_t search_page_table(int page_number);
+void update_tlb(int page_number, uint8_t frame_number);
 
 int main(int argc, char *argv[]) {
     // Check for correct arguments
@@ -32,7 +42,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Initialize page table and TLB
-    for (int i = 0; i < PAGE_ENTRIES; i++) {
+    for (int i = 0; i < NUM_PAGES; i++) {
         page_table[i] = -1;
     }
 
@@ -53,11 +63,42 @@ int main(int argc, char *argv[]) {
 
     // Read logical addresses and translate them to physical addresses
     int logical_address;
+    signed char loaded_memory[FRAME_SIZE];
     while (fscanf(file, "%d", &logical_address) != EOF) {
         total_addresses++;
-        int page_number = (logical_address & 0xFF00) >> 8; // Not sure if this is right
-        int offset = logical_address & 0x00FF; // Same with this
-        // TODO - Convert logical address to physical address by searching TLB first, then if not found, page table, and if not found there, then handle page fault
+
+        // Calculate page_number and offset with binary algebra and 0xff masks
+        int page_number = ((logical_address >> 8) & 0xFF);
+        int offset = logical_address & 0xFF;
+        
+        uint16_t frame_number;
+        if ((frame_number = search_tlb(page_number)) != TLB_MISS) ++tlb_hits;
+        else if ((frame_number = search_page_table(page_number)) != PAGE_TABLE_MISS) {}
+        else {
+            frame_number = next_frame_number;
+
+            // Flush "page_table" and "tlb" of all values that point to "frame_number" so that we aren't pointing to old data
+            remove_from_page_table(frame_number);
+            remove_from_tlb(frame_number);
+
+            // Read data from the backing_store and load it into "memory"
+            read_file_page(backing_store, loaded_memory, page_number);
+            memcpy(memory + (FRAME_SIZE * frame_number), loaded_memory, FRAME_SIZE);
+
+            // Update TLB and page table with the frame number
+            update_tlb(page_number, frame_number);
+            update_page_table(page_number, frame_number);
+
+
+            // "FIFO" algorithm for frame numbers
+            next_frame_number = (next_frame_number + 1) % NUM_FRAMES;
+            ++page_faults;
+        }
+
+        uint16_t physical_address = (frame_number << 8) | offset;
+        signed char value = memory[physical_address];
+
+        printf("0x%04x -> 0x%04x: %d\n", logical_address, physical_address, value);
     }
 
     // Close files
@@ -74,23 +115,66 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+// Reads a frame in from a file
+void read_file_page(FILE *file, signed char buffer[FRAME_SIZE], int page) {
+    fseek(file, FRAME_SIZE * page, SEEK_SET);
+    fread(buffer, 1, FRAME_SIZE, file);
+}
+
+// Printfs a frame buffer
+void print_frame(signed char *buffer) {
+    int i;
+    for (i = 0; i < FRAME_SIZE; i++)
+    {
+        if (i > 0)
+            if (i % 16 == 0) printf("\n");
+            else printf(" ");
+        printf("%02x", buffer[i] & 0xff);
+    }
+    printf("\n");
+}
+
 // Function to search for a page number in the TLB
-int search_tlb(int page_number) {
+uint16_t search_tlb(int page_number) {
     for (int i = 0; i < TLB_SIZE; i++) {
         if (tlb[i][0] == page_number) {
             return tlb[i][1]; // Return frame number if found
         }
     }
-    return -1; // If not found, return -1
+
+    return TLB_MISS;
 }
 
 // Function to search for a page number in the page table
-int search_page_table(int page_number) {
+uint16_t search_page_table(int page_number) {
     return page_table[page_number];
 }
 
+// Update the page table with the reference for page_number -> frame_number
+void update_page_table(int page_number, uint8_t frame_number) {
+    page_table[page_number] = frame_number;
+}
+
+// Remove a referenced frame number from the page table
+void remove_from_page_table(uint8_t frame_number) {
+    for (int i = 0; i < NUM_PAGES; i++) {
+        if (page_table[i] == frame_number) {
+            page_table[i] = -1;
+        }
+    }
+}
+
+// Remove a referenced frame number from the tlb
+void remove_from_tlb(uint8_t frame_number) {
+    for (int i = 0; i < TLB_SIZE; i++) {
+        if (tlb[i][1] == frame_number) {
+            tlb[i][0] = -1;
+        }
+    }
+}
+
 // Function to update TLB with a new entry
-void update_tlb(int page_number, int frame_number) {
+void update_tlb(int page_number, uint8_t frame_number) {
     int empty_index = -1;
 
     // Search for an empty slot in the TLB

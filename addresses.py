@@ -2,6 +2,7 @@
 
 import random
 
-with open("addresses.txt", "w") as f:
+with open("specific.txt", "w") as f:
     for i in range(1000):
-        f.write(str(random.randint(0, 65535)) + "\n")
+        f.write(str(128 * (i % 5)) + "\n")
+        # f.write(str(random.randint(0, 65535)) + "\n")
