@@ -3,11 +3,14 @@
 #include <stdint.h>
 #include <string.h>
 
+// Change these variables to adjust the "physical memory" size.
+#define NUM_FRAMES 256
+#define MEMORY_SIZE 65536
+
+// DO NOT TOUCH BELOW THIS LINE
 #define FRAME_SIZE 256
 #define TLB_SIZE 16
 #define NUM_PAGES 256
-#define NUM_FRAMES 128
-#define MEMORY_SIZE 65536
 
 #define TLB_MISS 65535
 #define PAGE_TABLE_MISS 65535
